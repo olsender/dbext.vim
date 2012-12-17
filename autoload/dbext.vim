@@ -5015,7 +5015,7 @@ function! dbext#DB_execSqlWithDefault(...)
             let sql = sql . a:2
         endif
     else
-        let sql = sql . expand("<cword>")
+        let sql = sql . expand("<cWORD>")
     endif
     
     return dbext#DB_execSql(sql)
@@ -5159,7 +5159,7 @@ function! dbext#DB_describeTable(...)
     if(a:0 > 0)
         let table_name = s:DB_getObjectAndQuote(a:1)
     else
-        let table_name = expand("<cword>")
+        let table_name = expand("<cWORD>")
     endif
     if table_name == ""
         call s:DB_warningMsg( 'dbext:You must supply a table name' )
@@ -5173,7 +5173,7 @@ function! dbext#DB_describeProcedure(...)
     if(a:0 > 0)
         let procedure_name = s:DB_getObjectAndQuote(a:1)
     else
-        let procedure_name = expand("<cword>")
+        let procedure_name = expand("<cWORD>")
     endif
     if procedure_name == ""
         call s:DB_warningMsg( 'dbext:You must supply a procedure name' )
@@ -5353,111 +5353,23 @@ function! s:DB_errorMsg(msg)
 endfunction
 
 function! dbext#DB_getQueryUnderCursor()
-    let use_defaults = 1
-    " In order to parse a statement, we must know what database type
-    " we are dealing with to choose the correct cmd_terminator
-    if s:DB_get("buffer_defaulted") != 1
-        let rc = s:DB_resetBufferParameters(use_defaults)
-        if rc == -1
-            call s:DB_warningMsg( "dbext:A valid database type must be chosen" )
-            return ""
-        endif
-    endif
-
-    " Mi van olyankor, ha az idezojelben van pontosvesszo, vagy kulcsszo?
-    " Van egy hiba gifem, majd meg kell nezni mi a rossz
-    let old_sel = &sel
-    let &sel = 'inclusive'
-    let saveWrapScan=&wrapscan
-    let saveSearch=@/
-    let reg_z = @z
-    let &wrapscan=0
-    let @z = ''
-
-    " If a command terminator has already been specified, use it
-    " It is necessary to default it first, since this function
-    " can be called before a buffer has setup which database it
-    " will connect to.  The command terminator is different for
-    " many databases.
-    let dbext_cmd_terminator = dbext#DB_getWType('cmd_terminator')
-    " If the cmd_terminator has any special characters, these must
-    " be escaped before they can be used in a search string or
-    " on the command line
-    let dbext_cmd_terminator = s:DB_escapeStr(dbext_cmd_terminator)
-
     " Mark the current line to return to
     let curline     = line(".")
     let curcol      = virtcol(".")
 
-    " Must default the statements to query
-    let dbext_query_statements = s:DB_get("query_statements")
-    " Verify the string is in the correct format
-    " Strip off any trailing commas
-    let dbext_query_statements =
-                \ substitute(dbext_query_statements, ',$','','')
-    " Convert commas to regex ors
-    let dbext_query_statements =
-                \ substitute(dbext_query_statements, '\s*,\s*', '\\|', 'g')
-
-    " Make this a bit smarter, make sure there is whitespace from the 
-    " beginning of the line here so that we do not pickup embedded
-    " statements like:
-    "      select 'insert into ...'
-    "        from T1
-    " This would have stopped at the INSERT word.  It is not perfect
-    " but it is better with the check.
-    let sql_commands = '\c^\s*\zs\<\('.dbext_query_statements.'\)\>'
-
-    " Advance the cursor by 1 character incase the cursor is at the
-    " beginning of one of the query statements
-    if col('.') < (col('$')-1)
-        exec 'normal! l'
+    let startLine = search(';', 'bW')+1
+    call cursor(startLine, 0)
+    let endLine = search(';', 'W')
+    if endLine == 0
+        let endLine = line("$")
     endif
 
-    " Search backwards and do NOT wrap
-    if search(sql_commands, 'bW' ) > 0
-        " Note: escape the command terminator with \ in case the
-        " string choosen is a special string.
-        " I have tested this with the following terminators
-        " ; ~ go
-        " Note: I added the /e to the search string, since vim
-        " was not picking up the command terminator as part of the
-        " yank. This is generally not an issue since each of the
-        " database exec sql routines add one, but if your
-        " terminator is multiple characters (ie go - ASE and SQL Server)
-        " then you get an invalid command since it was stripping
-        " the "o" from "go"
-        "
-        " Make sure the cmd_terminator is the last item on the line,
-        " in otherwords do not stop if the ; is part of a string:
-        "    select 'insert into ...;'
-        "      from T1
-        " In the above case, we would stop even though the ; was
-        " not the command terminator.
+    let query = ''
+    for line in getline(startLine, endLine)
+        let query .= ' '.line
+    endfor
 
-        " Start visual mode, find the terminator (should be at end of line)
-        exe 'silent! norm! v/'.dbext_cmd_terminator."\\s*$/e\n".'"zy``'
-
-        if line("'<") == line("'>") &&
-                    \ col("'<") == col("'>")
-            " No command terminator was found, so just use
-            " the current lines content
-            let @z = strpart(getline("'<"), (col("'<")-1))
-        endif
-    endif
-
-    " Return to previous location
-    " Accounting for beginning of the line
-    " silent! exe 'norm! '.curline."G\<bar>".(curcol-1).(((curcol-1)> 0)?'l':'')
     call cursor(curline, curcol)
-
-    noh
-    let query = @z
-    let @z = reg_z
-    let @/=saveSearch
-    let &wrapscan=saveWrapScan
-    let &sel = old_sel
-
     return query
 endfunction
 
@@ -8230,4 +8142,5 @@ endfunction
 call s:DB_buildLists()
 
 call s:DB_resetGlobalParameters()
+
 " vim:fdm=marker:nowrap:ts=4:expandtab:ff=unix:
